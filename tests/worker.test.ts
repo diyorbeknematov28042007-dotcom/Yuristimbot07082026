@@ -12,7 +12,7 @@ vi.mock('../worker/bot', async importOriginal => {
 });
 
 const env = (state?: unknown): Env => ({
-  BOT_TOKEN:'123:test',WEBHOOK_SECRET:'secret',SUPABASE_URL:'https://example.supabase.co',SUPABASE_KEY:'test',
+  BOT_TOKEN:'123:test',WEBHOOK_SECRET:'secret',DB:{} as D1Database,
   USER_STATE: {getByName: () => state} as unknown as Env['USER_STATE']
 });
 const update = (id: number, text='/start'): Update => ({update_id:id,message:{message_id:id,date:1,chat:{id:42,type:'private' as const,first_name:'Test'},from:{id:42,is_bot:false,first_name:'Test'},text}});
@@ -45,13 +45,14 @@ describe('input and atomic claim',()=>{
   });
   it('allows exactly one competing lawyer to claim an active ad',async()=>{
     let active=true;
-    vi.stubGlobal('fetch',vi.fn(async (url:URL,options:RequestInit)=>{
-      expect(url.searchParams.get('status')).toBe('eq.active');
-      expect(options.method).toBe('PATCH');
-      const winner=active;active=false;
-      return Response.json(winner?[{request_code:'#ABC123',user_id:42,status:'accepted'}]:[]);
-    }));
-    const db=new Database(env());
+    const binding={prepare:(sql:string)=>{
+      expect(sql).toContain("status='active'");
+      return {bind:(_lawyer:number,_code:string)=>({first:async()=>{
+        const winner=active;active=false;
+        return winner?{request_code:'#ABC123',user_id:42,status:'accepted'}:null;
+      }})};
+    }} as unknown as D1Database;
+    const db=new Database(binding);
     const result=await Promise.all([db.claimAd('#ABC123',100),db.claimAd('#ABC123',200)]);
     expect(result.filter(Boolean)).toHaveLength(1);
   });
@@ -74,7 +75,7 @@ describe('Durable Object persistence and flood control',()=>{
     expect(await obj.process(update(1))).toBe('ok');
     expect(await obj.process(update(1))).toBe('duplicate');
     expect(ids.size).toBe(1);
-    expect(state).toMatchObject({step:'chatting',model:'gemini-2.5-flash',draft:{category:'x'}});
+    expect(state).toMatchObject({step:'chatting',model:'gemini-3.5-flash-lite',draft:{category:'x'}});
     const restarted=new UserState(ctx as unknown as DurableObjectState,e);
     expect(await restarted.process(update(2))).toBe('ok');
     expect(state).toMatchObject({draft:{category:'xx'}});

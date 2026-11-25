@@ -15,7 +15,7 @@ export class UserState extends DurableObject<Env> {
       ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS updates (id INTEGER PRIMARY KEY, received INTEGER NOT NULL)');
       ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate (id INTEGER PRIMARY KEY CHECK(id=1), window INTEGER NOT NULL, count INTEGER NOT NULL)');
     });
-    this.bot=createBot(env,new Database(env),()=>this.currentSession);
+    this.bot=createBot(env,new Database(env.DB),()=>this.currentSession);
   }
   async process(update: Update): Promise<'ok'|'duplicate'|'limited'> {
     const task = this.pending.then(() => this.processOne(update));
@@ -34,6 +34,7 @@ export class UserState extends DurableObject<Env> {
     sql.exec('INSERT INTO updates (id,received) VALUES (?,?)',update.update_id,now);
     if(update.update_id%64===0) sql.exec('DELETE FROM updates WHERE received<?',now-7*86_400_000);
     const session=await this.ctx.storage.get<Session>('session') ?? initialSession();
+    if(session.model!=='gemini-3.5-flash-lite' && session.model!=='gemini-3-flash-preview') session.model='gemini-3.5-flash-lite';
     try {
       // Session is scoped to the per-actor Durable Object, never a process global.
       this.currentSession=session;

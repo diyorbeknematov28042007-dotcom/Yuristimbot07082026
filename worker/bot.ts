@@ -2,17 +2,17 @@ import { Bot, Context } from 'grammy';
 import type { BotConfig } from 'grammy';
 import type { Update } from 'grammy/types';
 import { askYuristim } from './ai';
-import { Database, escapeHtml, price, requestCode } from './db';
+import { Database, DuplicateRequestCodeError, escapeHtml, price, requestCode } from './db';
 import type { Env, User, Ad } from './db';
 import * as k from './keyboards';
 
 export type Step = '' | 'chatting' | 'category' | 'description' | 'price_type' | 'min_price' | 'max_price' | 'bio' | 'admin_category' | 'admin_title_doc' | 'admin_title_article' | 'admin_title_lit' | 'admin_value';
 export interface Session {
   step: Step;
-  model: 'gemini-2.5-flash' | 'gemini-2.5-pro';
+  model: 'gemini-3.5-flash-lite' | 'gemini-3-flash-preview';
   draft: { category?: string; description?: string; price_type?: 'agreed' | 'free' | 'exact'; min_price?: number; max_price?: number; contentType?: string; title?: string };
 }
-export const initialSession = (): Session => ({ step: '', model: 'gemini-2.5-flash', draft: {} });
+export const initialSession = (): Session => ({ step: '', model: 'gemini-3.5-flash-lite', draft: {} });
 interface BotContext extends Context { session: Session }
 const mainKeyboard = (u: User) => u.role === 'lawyer' ? k.lawyerMain() : k.userMain();
 const validText = (text: string | undefined, max = 1500) => typeof text === 'string' && text.trim().length > 0 && text.length <= max;
@@ -43,13 +43,13 @@ export function createBot(env: Env, db: Database, sessionSource: () => Session |
     if (!user || user.role !== 'user') return;
     const d = ctx.session.draft;
     if (!d.category || !d.description || !d.price_type) return;
-    // Unique constraint in the existing schema protects the unlikely code collision.
+    // D1's unique request code constraint protects the unlikely code collision.
     let ad: Ad | undefined;
     for (let i = 0; i < 3 && !ad; i++) {
       try { ad = await db.createAd({ request_code: requestCode(), user_id: ctx.from!.id,
         category: d.category, description: d.description, price_type: d.price_type,
         min_price: d.min_price ?? null, max_price: d.max_price ?? null }); }
-      catch (e) { if (!(e instanceof Error) || !e.message.endsWith(': 409') || i === 2) throw e; }
+      catch (e) { if (!(e instanceof DuplicateRequestCodeError) || i === 2) throw e; }
     }
     if (!ad) return;
     ctx.session.step = ''; ctx.session.draft = {};
@@ -94,13 +94,13 @@ export function createBot(env: Env, db: Database, sessionSource: () => Session |
   });
   bot.hears('🤖 Yuristim AI', async ctx => {
     if (!await requireUser(ctx)) return;
-    ctx.session.step = 'chatting'; ctx.session.model = 'gemini-2.5-flash';
+    ctx.session.step = 'chatting'; ctx.session.model = 'gemini-3.5-flash-lite';
     await ctx.reply("🤖 <b>Yuristim AI</b>\n\nJoriy model: Yuristim 1.0 (Tezkor)\nSavolingizni to'g'ridan-to'g'ri yozib yuboring yoki quyidagi imkoniyatlardan foydalaning:", {parse_mode:'HTML',reply_markup:k.aiMenu()});
   });
   bot.callbackQuery('ai_change_model', async ctx => {
     if (!await requireUser(ctx)) return;
-    ctx.session.model = ctx.session.model === 'gemini-2.5-flash' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
-    const name = ctx.session.model === 'gemini-2.5-pro' ? "1.5 (Chuqur o'y)" : '1.0 (Tezkor)';
+    ctx.session.model = ctx.session.model === 'gemini-3.5-flash-lite' ? 'gemini-3-flash-preview' : 'gemini-3.5-flash-lite';
+    const name = ctx.session.model === 'gemini-3-flash-preview' ? "1.5 (Chuqur o'y)" : '1.0 (Tezkor)';
     await ctx.editMessageText(`🤖 <b>Yuristim AI</b>\n\nJoriy model: Yuristim ${name}\nSavolingizni yo'llang:`, {parse_mode:'HTML',reply_markup:k.aiMenu()});
     await ctx.answerCallbackQuery({text:`Model ${name} ga o'zgartirildi!`,show_alert:true});
   });

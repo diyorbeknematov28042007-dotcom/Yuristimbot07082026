@@ -1,6 +1,6 @@
 import type { Env } from './db';
 
-export async function askYuristim(env: Env, prompt: string, model: 'gemini-2.5-flash' | 'gemini-2.5-pro'): Promise<string> {
+export async function askYuristim(env: Env, prompt: string, model: 'gemini-3.5-flash-lite' | 'gemini-3-flash-preview'): Promise<string> {
   if (!env.GEMINI_API_KEY) return 'AI tizimi hozircha mavjud emas (API Kalit kiritilmagan).';
   const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
   try {
@@ -10,7 +10,9 @@ export async function askYuristim(env: Env, prompt: string, model: 'gemini-2.5-f
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: "Siz O'zbekiston Respublikasi qonunchiligi haqida umumiy ma'lumot beruvchi Yuristimsiz. Qonun moddasi yoki amaldagi tahririni tekshira olmasangiz, aniq manba deb ko'rsatmang; noaniqlikni ayting, mutaxassis va rasmiy manbaga yo'naltiring. Shaxsiy ma'lumotlarni qaytarmang." }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 600 }
+        generationConfig: model === 'gemini-3-flash-preview'
+          ? { maxOutputTokens: 1200, thinkingConfig: { thinkingLevel: 'medium' } }
+          : { maxOutputTokens: 600 }
       }),
       signal: AbortSignal.timeout(15000)
     });

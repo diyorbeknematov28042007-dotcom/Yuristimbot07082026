@@ -1,12 +1,11 @@
 export interface Env {
   BOT_TOKEN: string;
   WEBHOOK_SECRET: string;
-  SUPABASE_URL: string;
-  SUPABASE_KEY: string;
   GEMINI_API_KEY?: string;
   ADMIN_IDS?: string;
   CHANNEL_ID?: string;
   USER_STATE: DurableObjectNamespace;
+  DB: D1Database;
 }
 
 export interface User {
@@ -17,6 +16,7 @@ export interface User {
   is_accepted_offer: boolean;
   bio: string | null;
 }
+interface UserRow extends Omit<User, 'is_accepted_offer'> { is_accepted_offer: number }
 export interface Ad {
   request_code: string;
   user_id: number;
@@ -29,77 +29,66 @@ export interface Ad {
   accepted_lawyer_id: number | null;
 }
 export interface Item { id: number; type: string; title: string; url_or_file_id: string }
+export class DuplicateRequestCodeError extends Error {}
 
 export class Database {
-  constructor(private readonly env: Env) {}
-  private async request<T>(table: string, method: string, query = '', body?: object): Promise<T[]> {
-    const base = new URL(this.env.SUPABASE_URL);
-    if (base.protocol !== 'https:' || !/^[a-z_]+$/.test(table)) throw new Error('Invalid database configuration');
-    const url = new URL(`/rest/v1/${table}?${query}`, base);
-    const response = await fetch(url, {
-      method,
-      headers: {
-        apikey: this.env.SUPABASE_KEY,
-        Authorization: `Bearer ${this.env.SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: method === 'POST' || method === 'PATCH' ? 'return=representation' : ''
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!response.ok) throw new Error(`Supabase ${method} ${table}: ${response.status}`);
-    return response.json() as Promise<T[]>;
+  constructor(private readonly db: D1Database) {}
+  private asUser(row: UserRow | null): User | null {
+    return row ? { ...row, is_accepted_offer: Boolean(row.is_accepted_offer) } : null;
   }
   async getUser(id: number): Promise<User | null> {
-    return (await this.request<User>('users', 'GET', `telegram_id=eq.${id}&select=telegram_id,full_name,username,role,is_accepted_offer,bio&limit=1`))[0] ?? null;
+    return this.asUser(await this.db.prepare('SELECT telegram_id,full_name,username,role,bio,is_accepted_offer FROM users WHERE telegram_id=?').bind(id).first<UserRow>());
   }
   async createUser(id: number, fullName: string, username: string | undefined): Promise<User> {
-    // Unique telegram_id preserves existing users during a race or migration.
-    return (await this.request<User>('users', 'POST', 'on_conflict=telegram_id', {
-      telegram_id: id, full_name: fullName, username: username ?? null, role: 'user', is_accepted_offer: false
-    }))[0]!;
+    // The unique telegram_id is also the idempotency key for registration.
+    await this.db.prepare("INSERT INTO users (telegram_id,full_name,username,role,is_accepted_offer) VALUES (?,?,?,'user',0) ON CONFLICT(telegram_id) DO NOTHING").bind(id,fullName,username??null).run();
+    const user=await this.getUser(id);
+    if(!user) throw new Error('Registration failed');
+    return user;
   }
-  async ensureUser(id: number, name: string, username?: string): Promise<User> {
-    const current = await this.getUser(id);
-    if (current) return current;
-    try { return await this.createUser(id, name, username); }
-    catch { const raced = await this.getUser(id); if (raced) return raced; throw new Error('Registration failed'); }
+  async ensureUser(id: number,name: string,username?: string): Promise<User> {
+    return await this.getUser(id) ?? this.createUser(id,name,username);
   }
-  async updateUser(id: number, values: Partial<Pick<User, 'role' | 'bio' | 'is_accepted_offer'>>): Promise<User> {
-    const rows = await this.request<User>('users', 'PATCH', `telegram_id=eq.${id}`, values);
-    if (!rows[0]) throw new Error('User not found');
-    return rows[0];
+  async updateUser(id: number, values: Partial<Pick<User,'role'|'bio'|'is_accepted_offer'>>): Promise<User> {
+    // Column names are a fixed allowlist; all values are bound.
+    const keys=(['role','bio','is_accepted_offer'] as const).filter(k=>values[k]!==undefined);
+    if(!keys.length) throw new Error('No user fields');
+    const params=keys.map(k=>k==='is_accepted_offer' ? (values[k]?1:0) : values[k]);
+    const row=await this.db.prepare(`UPDATE users SET ${keys.map(k=>`${k}=?`).join(',')} WHERE telegram_id=? RETURNING telegram_id,full_name,username,role,bio,is_accepted_offer`).bind(...params,id).first<UserRow>();
+    const user=this.asUser(row);
+    if(!user) throw new Error('User not found');
+    return user;
   }
-  async createAd(ad: Omit<Ad, 'status' | 'accepted_lawyer_id'>): Promise<Ad> {
-    const rows = await this.request<Ad>('requests', 'POST', '', { ...ad, status: 'active' });
-    if (!rows[0]) throw new Error('Request not stored');
-    return rows[0];
+  async createAd(ad: Omit<Ad,'status'|'accepted_lawyer_id'>): Promise<Ad> {
+    const row=await this.db.prepare("INSERT INTO requests (request_code,user_id,category,description,price_type,min_price,max_price,status) VALUES (?,?,?,?,?,?,?,'active') ON CONFLICT(request_code) DO NOTHING RETURNING request_code,user_id,category,description,price_type,min_price,max_price,status,accepted_lawyer_id")
+      .bind(ad.request_code,ad.user_id,ad.category,ad.description,ad.price_type,ad.min_price,ad.max_price).first<Ad>();
+    if(!row) throw new DuplicateRequestCodeError('Request code collision');
+    return row;
   }
-  async getAd(code: string): Promise<Ad | null> {
-    return (await this.request<Ad>('requests', 'GET', `request_code=eq.${encodeURIComponent(code)}&select=*&limit=1`))[0] ?? null;
+  async getAd(code:string): Promise<Ad|null> {
+    return this.db.prepare('SELECT * FROM requests WHERE request_code=?').bind(code).first<Ad>();
   }
-  async claimAd(code: string, lawyerId: number): Promise<Ad | null> {
-    // Single conditional SQL UPDATE in PostgREST: exactly one concurrent claimant wins.
-    return (await this.request<Ad>('requests', 'PATCH', `request_code=eq.${encodeURIComponent(code)}&status=eq.active`, {
-      status: 'accepted', accepted_lawyer_id: lawyerId
-    }))[0] ?? null;
+  async claimAd(code:string,lawyerId:number): Promise<Ad|null> {
+    // One SQLite UPDATE with a status predicate: only the first concurrent claimant succeeds.
+    return this.db.prepare("UPDATE requests SET status='accepted',accepted_lawyer_id=? WHERE request_code=? AND status='active' RETURNING request_code,user_id,category,description,price_type,min_price,max_price,status,accepted_lawyer_id")
+      .bind(lawyerId,code).first<Ad>();
   }
-  async adsForUser(id: number): Promise<Ad[]> {
-    return this.request<Ad>('requests', 'GET', `user_id=eq.${id}&select=*&order=created_at.desc&limit=20`);
+  async adsForUser(id:number): Promise<Ad[]> {
+    return (await this.db.prepare('SELECT * FROM requests WHERE user_id=? ORDER BY created_at DESC LIMIT 20').bind(id).all<Ad>()).results;
   }
-  async lawyerHistory(id: number): Promise<Ad[]> {
-    return this.request<Ad>('requests', 'GET', `accepted_lawyer_id=eq.${id}&select=*&order=created_at.desc&limit=20`);
+  async lawyerHistory(id:number): Promise<Ad[]> {
+    return (await this.db.prepare('SELECT * FROM requests WHERE accepted_lawyer_id=? ORDER BY created_at DESC LIMIT 20').bind(id).all<Ad>()).results;
   }
-  async items(type: string): Promise<Item[]> {
-    return this.request<Item>('dynamic_content', 'GET', `type=eq.${encodeURIComponent(type)}&select=id,type,title,url_or_file_id&limit=30`);
+  async items(type:string): Promise<Item[]> {
+    return (await this.db.prepare('SELECT id,type,title,url_or_file_id FROM dynamic_content WHERE type=? LIMIT 30').bind(type).all<Item>()).results;
   }
-  async item(id: number): Promise<Item | null> {
-    return (await this.request<Item>('dynamic_content', 'GET', `id=eq.${id}&select=id,type,title,url_or_file_id&limit=1`))[0] ?? null;
+  async item(id:number): Promise<Item|null> {
+    return this.db.prepare('SELECT id,type,title,url_or_file_id FROM dynamic_content WHERE id=?').bind(id).first<Item>();
   }
-  async addItem(type: string, title: string, value: string): Promise<Item> {
-    const result = (await this.request<Item>('dynamic_content', 'POST', '', { type, title, url_or_file_id: value }))[0];
-    if (!result) throw new Error('Content not stored');
-    return result;
+  async addItem(type:string,title:string,value:string): Promise<Item> {
+    const row=await this.db.prepare('INSERT INTO dynamic_content (type,title,url_or_file_id) VALUES (?,?,?) RETURNING id,type,title,url_or_file_id').bind(type,title,value).first<Item>();
+    if(!row) throw new Error('Content not stored');
+    return row;
   }
 }
 

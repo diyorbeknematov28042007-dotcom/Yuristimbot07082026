@@ -22,7 +22,7 @@ export default {
     const path=new URL(request.url).pathname;
     if(path==='/health' && request.method==='GET') return Response.json({status:'ok',service:'yuristim-bot'});
     if(path!=='/webhook' || request.method!=='POST') return new Response('Not found',{status:404});
-    if(!env.BOT_TOKEN || !env.WEBHOOK_SECRET || !env.SUPABASE_URL || !env.SUPABASE_KEY) return new Response('Unavailable',{status:503});
+    if(!env.BOT_TOKEN || !env.WEBHOOK_SECRET || !env.DB) return new Response('Unavailable',{status:503});
     const token=request.headers.get('X-Telegram-Bot-Api-Secret-Token')??'';
     if(!safeEquals(token,env.WEBHOOK_SECRET)) return new Response('Unauthorized',{status:401});
     if(!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json'))return new Response('Unsupported media type',{status:415});

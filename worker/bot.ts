@@ -95,7 +95,7 @@ export function createBot(env: Env, db: Database, sessionSource: () => Session |
   bot.hears('🤖 Yuristim AI', async ctx => {
     if (!await requireUser(ctx)) return;
     ctx.session.step = 'chatting'; ctx.session.model = 'gemini-3.5-flash-lite';
-    await ctx.reply("🤖 <b>Yuristim AI</b>\n\nJoriy model: Yuristim 1.0 (Tezkor)\nSavolingizni to'g'ridan-to'g'ri yozib yuboring yoki quyidagi imkoniyatlardan foydalaning:", {parse_mode:'HTML',reply_markup:k.aiMenu()});
+    await ctx.reply("🤖 <b>Yuristim AI</b>\n\nJoriy model: Yuristim 1.0 (Tezkor)\nSavolingizni to'g'ridan-to'g'ri yozib yuboring yoki quyidagi imkoniyatlardan foydalaning:\n\n⚠️ Savol Gemini xizmatiga yuboriladi. Maxfiy shaxsiy ma'lumotlar va hujjatlarni yubormang; savolni anonimlashtiring.", {parse_mode:'HTML',reply_markup:k.aiMenu()});
   });
   bot.callbackQuery('ai_change_model', async ctx => {
     if (!await requireUser(ctx)) return;

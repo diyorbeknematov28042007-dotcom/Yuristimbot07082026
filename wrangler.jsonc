@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-25",
+  "observability": { "enabled": true, "head_sampling_rate": 0.05, "traces": { "enabled": true, "head_sampling_rate": 0.05 } },
+  "env": {
+    "staging": {
+      "name": "yuristim-bot-staging",
+      "durable_objects": { "bindings": [{ "name": "USER_STATE", "class_name": "UserState" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserState"] }]
+    },
+    "production": {
+      "name": "yuristim-bot",
+      "durable_objects": { "bindings": [{ "name": "USER_STATE", "class_name": "UserState" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserState"] }]
+    }
+  }
+}

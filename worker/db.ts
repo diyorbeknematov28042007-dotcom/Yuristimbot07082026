@@ -59,11 +59,17 @@ export class Database {
     if(!user) throw new Error('User not found');
     return user;
   }
-  async createAd(ad: Omit<Ad,'status'|'accepted_lawyer_id'>): Promise<Ad> {
-    const row=await this.db.prepare("INSERT INTO requests (request_code,user_id,category,description,price_type,min_price,max_price,status) VALUES (?,?,?,?,?,?,?,'active') ON CONFLICT(request_code) DO NOTHING RETURNING request_code,user_id,category,description,price_type,min_price,max_price,status,accepted_lawyer_id")
-      .bind(ad.request_code,ad.user_id,ad.category,ad.description,ad.price_type,ad.min_price,ad.max_price).first<Ad>();
-    if(!row) throw new DuplicateRequestCodeError('Request code collision');
-    return row;
+  async createAd(ad: Omit<Ad,'status'|'accepted_lawyer_id'>, updateId: number): Promise<Ad> {
+    const byUpdate = () => this.db.prepare('SELECT request_code,user_id,category,description,price_type,min_price,max_price,status,accepted_lawyer_id FROM requests WHERE source_update_id=?').bind(updateId).first<Ad>();
+    // The Telegram update ID persists across webhook retries, even if the random code changes.
+    const existing=await byUpdate();
+    if(existing) return existing;
+    const row=await this.db.prepare("INSERT INTO requests (request_code,source_update_id,user_id,category,description,price_type,min_price,max_price,status) VALUES (?,?,?,?,?,?,?,?,'active') ON CONFLICT DO NOTHING RETURNING request_code,user_id,category,description,price_type,min_price,max_price,status,accepted_lawyer_id")
+      .bind(ad.request_code,updateId,ad.user_id,ad.category,ad.description,ad.price_type,ad.min_price,ad.max_price).first<Ad>();
+    if(row) return row;
+    const raced=await byUpdate();
+    if(raced) return raced;
+    throw new DuplicateRequestCodeError('Request code collision');
   }
   async getAd(code:string): Promise<Ad|null> {
     return this.db.prepare('SELECT * FROM requests WHERE request_code=?').bind(code).first<Ad>();

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   request_code TEXT NOT NULL UNIQUE,
+  source_update_id INTEGER NOT NULL UNIQUE,
   user_id INTEGER NOT NULL REFERENCES users(telegram_id),
   category TEXT NOT NULL,
   description TEXT NOT NULL,

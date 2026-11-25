@@ -48,7 +48,7 @@ export function createBot(env: Env, db: Database, sessionSource: () => Session |
     for (let i = 0; i < 3 && !ad; i++) {
       try { ad = await db.createAd({ request_code: requestCode(), user_id: ctx.from!.id,
         category: d.category, description: d.description, price_type: d.price_type,
-        min_price: d.min_price ?? null, max_price: d.max_price ?? null }); }
+        min_price: d.min_price ?? null, max_price: d.max_price ?? null }, ctx.update.update_id); }
       catch (e) { if (!(e instanceof DuplicateRequestCodeError) || i === 2) throw e; }
     }
     if (!ad) return;

@@ -56,6 +56,24 @@ describe('input and atomic claim',()=>{
     const result=await Promise.all([db.claimAd('#ABC123',100),db.claimAd('#ABC123',200)]);
     expect(result.filter(Boolean)).toHaveLength(1);
   });
+  it('reuses the stored request when Telegram retries the same creation update',async()=>{
+    const rows=new Map<number,import('../worker/db').Ad>();
+    const binding={prepare:(sql:string)=>({bind:(...params:unknown[])=>({first:async()=>{
+      if(sql.startsWith('SELECT request_code'))return rows.get(params[0] as number)??null;
+      if(sql.startsWith('INSERT INTO requests')){
+        const ad={request_code:params[0] as string,user_id:params[2] as number,category:params[3] as string,description:params[4] as string,price_type:'free' as const,min_price:null,max_price:null,status:'active',accepted_lawyer_id:null};
+        if(rows.has(params[1] as number))return null;
+        rows.set(params[1] as number,ad);return ad;
+      }
+      throw new Error('Unexpected SQL');
+    }})})} as unknown as D1Database;
+    const db=new Database(binding);
+    const draft={user_id:42,category:'Maslahat',description:'Savol',price_type:'free' as const,min_price:null,max_price:null};
+    const created=await db.createAd({request_code:'#ABC123',...draft},100);
+    const retried=await db.createAd({request_code:'#XYZ987',...draft},100);
+    expect(retried.request_code).toBe(created.request_code);
+    expect(rows.size).toBe(1);
+  });
 });
 
 describe('Durable Object persistence and flood control',()=>{

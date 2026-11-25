@@ -1,0 +1,67 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-25",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.05,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    }
+  },
+  "env": {
+    "staging": {
+      "name": "yuristim-bot-staging",
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_STATE",
+            "class_name": "UserState"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "UserState"
+          ]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "yuristim-staging",
+          "database_id": "2ead4598-6f05-454f-ad53-4f1e24aa8be6"
+        }
+      ]
+    },
+    "production": {
+      "name": "yuristim-bot",
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_STATE",
+            "class_name": "UserState"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "UserState"
+          ]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "yuristim-production",
+          "database_id": "b372f459-d405-4cec-9bc7-39684f2ec1dd"
+        }
+      ]
+    }
+  }
+}

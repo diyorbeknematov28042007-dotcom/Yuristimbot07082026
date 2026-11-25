@@ -40,6 +40,8 @@ export class UserState extends DurableObject<Env> {
       await this.bot.init();
       await this.bot.handleUpdate(update);
       await this.ctx.storage.put('session',session);
+      // An abandoned legal-description draft is removed after one day of inactivity.
+      if (Object.keys(session.draft).length) await this.ctx.storage.setAlarm(Date.now()+86_400_000);
       return 'ok';
     } catch (e) {
       sql.exec('DELETE FROM updates WHERE id=?',update.update_id);
@@ -48,5 +50,9 @@ export class UserState extends DurableObject<Env> {
     } finally {
       this.currentSession=null;
     }
+  }
+  async alarm(): Promise<void> {
+    const session=await this.ctx.storage.get<Session>('session');
+    if(session && Object.keys(session.draft).length) await this.ctx.storage.put('session',initialSession());
   }
 }

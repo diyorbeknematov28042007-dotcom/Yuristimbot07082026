@@ -5,6 +5,7 @@
 Telegram `/webhook` → Worker (`worker/index.ts`: POST secret header, body limit) → per Telegram user SQLite Durable Object (`worker/state.ts`: persistent session, dedupe, 8 updates/10s, serialized handler execution) → grammY (`worker/bot.ts`) → existing Supabase REST tables (`worker/db.ts`) and Gemini HTTP (`worker/ai.ts`). GET `/health` is a public liveness check without private data. The original Python implementation remains on `main` and can remain on its current hosting while staging is tested. No database records are deleted or copied.
 
 Each user's Durable Object stores a session and recent Telegram update IDs. Session is saved after successful handling. The Supabase `requests` claim is an atomic `PATCH ... status=eq.active`, so competing lawyers cannot both win. As with most webhook systems, a crash between an external Telegram send and the session write can cause that send to repeat on a retry. Inspect before production cutover if strict exactly-once outbound delivery is required. Traffic is not automatically migrated by a Worker deployment.
+Abandoned draft descriptions are cleared by a Durable Object alarm after 24 hours since the last processed draft update. Accepted requests remain in Supabase according to the existing retention policy.
 
 ## Audit and migration notes
 

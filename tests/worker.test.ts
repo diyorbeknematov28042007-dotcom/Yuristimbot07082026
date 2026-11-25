@@ -68,7 +68,7 @@ describe('Durable Object persistence and flood control',()=>{
       if(query.startsWith('DELETE FROM updates WHERE id')) ids.delete(args[0] as number);
       return {toArray:()=>[]};
     }};
-    const ctx={storage:{sql,get:async()=>state,put:async(_key:string,value:unknown)=>{state=value;}},blockConcurrencyWhile:(fn:()=>Promise<void>)=>{void fn();}};
+    const ctx={storage:{sql,get:async()=>state,put:async(_key:string,value:unknown)=>{state=value;},setAlarm:async(_at:number)=>{}},blockConcurrencyWhile:(fn:()=>Promise<void>)=>{void fn();}};
     const e=env();
     const obj=new UserState(ctx as unknown as DurableObjectState,e);
     expect(await obj.process(update(1))).toBe('ok');
@@ -80,5 +80,7 @@ describe('Durable Object persistence and flood control',()=>{
     expect(state).toMatchObject({draft:{category:'xx'}});
     for(let id=3;id<=8;id++)expect(await restarted.process(update(id))).toBe('ok');
     expect(await restarted.process(update(9))).toBe('limited');
+    await restarted.alarm();
+    expect(state).toMatchObject({draft:{},step:''});
   });
 });
